@@ -1,0 +1,70 @@
+x-node: &node
+  build: .
+  restart: unless-stopped
+  volumes:
+    - ./keys/authorized_keys:/root/.ssh/authorized_keys:ro
+
+services:
+  master:
+    <<: *node
+    hostname: master
+    ports:
+      - "2222:22"
+    networks:
+      edge:
+        aliases: [master.lab]
+        ipv4_address: 172.21.0.10
+      internal:
+        aliases: [master.lab]
+        ipv4_address: 172.20.0.10
+    volumes:
+      - ./keys/authorized_keys:/root/.ssh/authorized_keys:ro
+      - ./keys/id_ed25519:/root/.ssh/id_ed25519:ro
+
+  slave1:
+    <<: *node
+    hostname: slave1
+    networks:
+      internal: { aliases: [slave1.lab], ipv4_address: 172.20.0.11 }
+    depends_on: [master]
+
+  slave2:
+    <<: *node
+    hostname: slave2
+    networks:
+      internal: { aliases: [slave2.lab], ipv4_address: 172.20.0.12 }
+    depends_on: [master]
+
+  slave3:
+    <<: *node
+    hostname: slave3
+    networks:
+      internal: { aliases: [slave3.lab], ipv4_address: 172.20.0.13 }
+    depends_on: [master]
+
+  slave4:
+    <<: *node
+    hostname: slave4
+    networks:
+      internal: { aliases: [slave4.lab], ipv4_address: 172.20.0.14 }
+    depends_on: [master]
+
+  slave5:
+    <<: *node
+    hostname: slave5
+    networks:
+      internal: { aliases: [slave5.lab], ipv4_address: 172.20.0.15 }
+    depends_on: [master]
+
+networks:
+  edge:
+    name: lab_edge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24
+  internal:
+    name: lab_internal
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24

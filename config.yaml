@@ -1,0 +1,25 @@
+# Scenario: the docker lab under testing/ — one Icinga master container
+# (reachable from the host over the lab_edge network) driving five monitored
+# clients that only live on the lab_internal network.
+mode: deploy
+
+master:
+  - ip: 172.21.0.10
+    name: master.lab
+    pathway: ssh
+    creds: ./testing/keys/id_ed25519
+    repo: https://github.com/galizaragoza/arsenal.git
+    dir: /test/testdir
+    method: rsync
+    user: root
+    subjects:
+      - ip: 172.20.0.11
+        name: slave1.lab
+      - ip: 172.20.0.12
+        name: slave2.lab
+      - ip: 172.20.0.13
+        name: slave3.lab
+      - ip: 172.20.0.14
+        name: slave4.lab
+      - ip: 172.20.0.15
+        name: slave5.lab
