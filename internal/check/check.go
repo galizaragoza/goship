@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"goship/internal/config"
+	"goship/internal/out"
 
 	"github.com/go-git/go-git/v6"
 	gconfig "github.com/go-git/go-git/v6/config"
@@ -22,7 +23,7 @@ const dialTimeout = 5 * time.Second
 // Repos checks that every repo something is actually deployed with can be
 // reached, and returns the set of distinct URLs it verified.
 func Repos(cfg *config.Config) (map[string]bool, error) {
-	fmt.Println("Checking if all the repos loaded in the config are reachable...")
+	out.Section("Checking repos")
 	checked := make(map[string]bool)
 	master := cfg.Master
 	// Only the repos something is actually deployed with are checked. An
@@ -51,16 +52,16 @@ func Repos(cfg *config.Config) (map[string]bool, error) {
 		if _, err := rem.List(&git.ListOptions{}); err != nil {
 			return checked, fmt.Errorf("checking repo %s: %w", url, err)
 		}
-		fmt.Printf("Repo %s exists, proceeding\n", url)
+		out.Item("Repo %s exists, proceeding", url)
 	}
-	fmt.Println("All repos in the loaded configuration are reachable")
+	out.Result("All repos in the loaded configuration are reachable")
 	return checked, nil
 }
 
 // Hosts checks that the machine at the head of the chain answers on the ssh
 // port.
 func Hosts(cfg *config.Config) error {
-	fmt.Println("\nChecking all the hosts in the loaded configuration...")
+	out.Section("Checking hosts")
 
 	// Only the first hop can be dialed from here: every other machine in the
 	// config, the master included, lives behind the one before it.
@@ -72,7 +73,7 @@ func Hosts(cfg *config.Config) error {
 		return err
 	}
 
-	fmt.Println("All hosts in the loaded configuration are reachable")
+	out.Result("All hosts in the loaded configuration are reachable")
 	return nil
 }
 
@@ -85,6 +86,6 @@ func dial(ip netip.Addr, name string) error {
 	if err := conn.Close(); err != nil {
 		return fmt.Errorf("problem closing a connection with host %s (%s)", ip, name)
 	}
-	fmt.Printf("Host %s (%s) is reachable, checking current configuration\n", ip, name)
+	out.Item("Host %s (%s) is reachable, checking current configuration", ip, name)
 	return nil
 }

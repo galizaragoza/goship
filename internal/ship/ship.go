@@ -6,8 +6,11 @@ import (
 	"os"
 
 	"goship/internal/config"
+	"goship/internal/out"
 
+	"github.com/mlafeldt/chef-runner/log"
 	"github.com/mlafeldt/chef-runner/rsync"
+	"golang.org/x/sync/errgroup"
 )
 
 // All deploys the master and, under it, each of its subjects. downRepos maps
@@ -15,6 +18,12 @@ import (
 // fetch.Repo.
 func All(cfg *config.Config, downRepos map[string]string) error {
 	master := &cfg.Master
+
+	// chef-runner logs at debug level by default, which would print the whole
+	// rsync command line in between the lines reporting on it.
+	log.SetLevel(log.LevelInfo)
+
+	out.Section("Shipping")
 
 	path, err := hopFile(cfg)
 	if err != nil {
@@ -26,21 +35,30 @@ func All(cfg *config.Config, downRepos map[string]string) error {
 	// An ignored master is the way in, not a destination: its subjects are
 	// still reached through it below, but nothing is written to it.
 	if master.Ignore {
-		fmt.Printf("Not deploying to %s, used as a jump host only\n", master.Name)
+		out.Item("Not deploying to %s, used as a jump host only", master.Name)
 	} else if err := rsyncTo(&master.Host, masterAlias, shell, downRepos); err != nil {
 		return err
 	}
 
+	g := new(errgroup.Group)
+
 	for j := range master.Subjects {
 		subject := &master.Subjects[j]
 		if subject.Ignore {
-			fmt.Printf("Not deploying to %s, ignored in the configuration\n", subject.Name)
+			out.Item("Not deploying to %s, ignored in the configuration", subject.Name)
 			continue
 		}
-		if err := rsyncTo(&subject.Host, subjectAlias(j), shell, downRepos); err != nil {
+		g.Go(func() error {
+			if err := rsyncTo(&subject.Host, subjectAlias(j), shell, downRepos); err != nil {
+				return err
+			}
+			return err
+		})
+		if err := g.Wait(); err != nil {
 			return err
 		}
 	}
+	out.Result("Successfully shipped the repo to every host")
 	return nil
 }
 
@@ -54,9 +72,9 @@ func rsyncTo(h *config.Host, alias, shell string, downRepos map[string]string) e
 	}
 
 	clt := rsync.Client{
-		Archive:     true,
-		Compress:    true,
-		Verbose:     true,
+		Archive:  true,
+		Compress: true,
+		// Verbose:     true,
 		Exclude:     []string{".git"},
 		RemoteShell: shell,
 		// The alias carries the address, the user and the way in, so rsync
@@ -70,10 +88,6 @@ func rsyncTo(h *config.Host, alias, shell string, downRepos map[string]string) e
 	if err := clt.Copy(h.Dir, src+"/"); err != nil {
 		return fmt.Errorf("deploying %s to %s: %w", h.Repo, h.Name, err)
 	}
-	fmt.Printf("Deployed %s to %s:%s\n", h.Repo, h.Name, h.Dir)
-	return nil
-}
-
-func scpTo(h *config.Host, alias, shell string, downRepos map[string]string) error {
+	out.Item("Deployed %s to %s:%s", h.Repo, h.Name, h.Dir)
 	return nil
 }

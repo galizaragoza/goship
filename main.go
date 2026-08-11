@@ -1,12 +1,12 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"goship/internal/check"
 	"goship/internal/config"
 	"goship/internal/fetch"
+	"goship/internal/out"
 	"goship/internal/ship"
 )
 
@@ -21,7 +21,7 @@ var cleanup = func() {}
 // cleanup from being forgotten. 1XX codes indicate network errors, 5XX local
 // ones.
 func fail(code int, format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	out.Error(format, args...)
 	cleanup()
 	os.Exit(code)
 }
@@ -35,18 +35,19 @@ func main() {
 		fail(1, "%v", err)
 	}
 
-	fmt.Println("Configuration file loaded correctly")
+	out.Section("Configuration")
+	out.Item("Loaded %s correctly", os.Args[1])
 
 	config.Print(cfg)
 
 	/* COMENTADO PARA HACER PRUEBAS
 	res, err := config.Confirm("Proceed with current configuration?")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		out.Error("%v", err)
 	}
 
 	if !res {
-		fmt.Println("Exiting")
+		out.Item("Exiting")
 		os.Exit(1)
 	}
 	*/
@@ -65,33 +66,33 @@ func main() {
 	cleanup = func() {
 		for _, dir := range downRepos {
 			if err := os.RemoveAll(dir); err != nil {
-				fmt.Fprintf(os.Stderr, "error cleaning up the downloaded repo: %v\n", err)
+				out.Error("error cleaning up the downloaded repo: %v", err)
 				os.Exit(501)
 			}
 		}
 	}
 	defer cleanup()
 
+	out.Section("Fetching repos")
+
 	for url := range checked {
 		dir, err := fetch.Repo(url)
 		if err != nil {
 			fail(103, "problem fetching one of the repos listed in the configuration: %v", err)
 		}
-		fmt.Printf("repo %s is fetched in %s\n", url, dir)
+		out.Item("Fetched %s into %s", url, dir)
 		downRepos[url] = dir
 	}
+	out.Result("All repos in the loaded configuration are fetched")
 
 	switch cfg.Mode {
 	case "report":
 
 	case "sync":
-		// sync.Diff still compares two local dirs and has no way to reach a
-		// subject's remote tree yet, so there is nothing to wire it to here.
-		fmt.Fprintln(os.Stderr, "sync mode is not implemented yet")
 
-	case "deploy":
+	case "ship":
 		if err := ship.All(cfg, downRepos); err != nil {
-			fmt.Fprintf(os.Stderr, "error deploying directories: %v\n", err)
+			out.Error("error deploying directories: %v", err)
 		}
 	}
 }

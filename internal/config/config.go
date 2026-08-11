@@ -9,7 +9,8 @@ import (
 	"os"
 	"slices"
 	"strconv"
-	"strings"
+
+	"goship/internal/out"
 
 	"gopkg.in/yaml.v3"
 )
@@ -255,18 +256,22 @@ func Load(path string) (*Config, error) {
 }
 
 // section writes a titled block at the given indent depth, followed by its
-// name/value pairs one level deeper.
+// name/value pairs one level deeper and a blank line, so that neighbouring
+// blocks do not run into one another.
 func section(depth int, title string, kv ...string) {
-	ind := strings.Repeat("\t", depth)
-	fmt.Printf("%s%s\n", ind, title)
+	out.Line(depth, "%s", title)
 	for i := 0; i < len(kv); i += 2 {
-		fmt.Printf("%s\t%s: %s\n", ind, kv[i], kv[i+1])
+		out.Line(depth+1, "%s: %s", kv[i], kv[i+1])
 	}
+	fmt.Println()
 }
 
-// Print writes the resolved configuration to stdout.
+// Print writes the resolved configuration to stdout, under whatever section
+// the caller has opened.
 func Print(cfg *Config) {
-	fmt.Printf("\nCurrent configuration:\nMode: %s\n", cfg.Mode)
+	out.Item("Mode: %s", cfg.Mode)
+	fmt.Println()
+
 	section(1, "Defaults:",
 		"Protocol", cfg.Protocol,
 		"User", cfg.User,
@@ -310,7 +315,7 @@ func Print(cfg *Config) {
 func Confirm(prompt string) (bool, error) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
-		fmt.Printf("%s [y/N]", prompt)
+		fmt.Printf("  %s [y/N] ", prompt)
 		input, err := reader.ReadString('\n')
 		if err != nil {
 			return false, fmt.Errorf("reading user confirmation: %w", err)
