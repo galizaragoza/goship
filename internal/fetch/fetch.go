@@ -10,14 +10,13 @@ import (
 	"github.com/go-git/go-git/v6/plumbing"
 )
 
-// tmpRoot is where the scratch clones are created.
-const tmpRoot = "/tmp"
-
 // Repo clones url into a fresh temporary directory and returns its path.
 // The caller owns the directory and must remove it when done, typically with
 // defer os.RemoveAll(path).
 func Repo(url string) (string, error) {
-	dir, err := os.MkdirTemp(tmpRoot, "nlgmonship-*")
+	// An empty root means os.TempDir(), so TMPDIR is honoured, matching how
+	// the ship package creates its own scratch files.
+	dir, err := os.MkdirTemp("", "goship-*")
 	if err != nil {
 		return "", fmt.Errorf("creating temp dir for %s: %w", url, err)
 	}

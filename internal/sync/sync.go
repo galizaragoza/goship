@@ -1,4 +1,5 @@
-// Package sync is responsible for the logic, that is: delivering the repos specified in the config file to the given IPs
+// Package sync compares a machine's local tree against the repo it should be
+// running and preserves what is about to be overwritten.
 package sync
 
 import (
@@ -9,6 +10,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 )
+
+// backupDir is where versioned copies are kept, relative to the mirror root.
+// Diff skips it so prior backups aren't reported as orphaned files.
+const backupDir = "versions"
 
 // MakeBackup copies every not-synced local file into a versioned backup before
 // it gets overwritten by the repo version. notSynced is keyed by paths relative
@@ -35,7 +40,7 @@ func backupFile(baseDir, rel, date string) error {
 		return fmt.Errorf("reading original file %s: %w", src, err)
 	}
 
-	dst := filepath.Join(baseDir, "versions", rel) + "." + date
+	dst := filepath.Join(baseDir, backupDir, rel) + "." + date
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("creating backup dir for %s: %w", dst, err)
 	}

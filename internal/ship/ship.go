@@ -1,11 +1,11 @@
-// Package deploy pushes the fetched repos onto every master and its subjects.
-package deploy
+// Package ship pushes the fetched repos onto every master and its subjects.
+package ship
 
 import (
 	"fmt"
-	"net/netip"
+	"os"
 
-	"nlgmonship/internal/config"
+	"goship/internal/config"
 
 	"github.com/mlafeldt/chef-runner/rsync"
 )
@@ -15,13 +15,19 @@ import (
 // fetch.Repo.
 func All(cfg *config.Config, downRepos map[string]string) error {
 	master := &cfg.Master
-	shell := remoteShell(master)
+
+	path, err := hopFile(cfg)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(path)
+	shell := fmt.Sprintf("ssh -F %q", path)
 
 	// An ignored master is the way in, not a destination: its subjects are
 	// still reached through it below, but nothing is written to it.
 	if master.Ignore {
 		fmt.Printf("Not deploying to %s, used as a jump host only\n", master.Name)
-	} else if err := copyTo(&master.Host, shell, downRepos); err != nil {
+	} else if err := rsyncTo(&master.Host, masterAlias, shell, downRepos); err != nil {
 		return err
 	}
 
@@ -31,28 +37,17 @@ func All(cfg *config.Config, downRepos map[string]string) error {
 			fmt.Printf("Not deploying to %s, ignored in the configuration\n", subject.Name)
 			continue
 		}
-		if err := copyTo(&subject.Host, shell, downRepos); err != nil {
+		if err := rsyncTo(&subject.Host, subjectAlias(j), shell, downRepos); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// remoteShell builds the ssh command rsync runs to reach the hosts under m.
-// When m is ignored it is a jump host rather than a target, so every transfer
-// is routed through it with ProxyJump; otherwise subjects are expected to be
-// reachable directly. The key is always the master's, as subjects carry none.
-func remoteShell(m *config.Master) string {
-	shell := "ssh -i " + m.Creds
-	if m.Ignore {
-		shell += fmt.Sprintf(" -J %s@%s:%d", m.User, hostFor(m.IP), m.Port)
-	}
-	return shell
-}
-
-// copyTo pushes the local clone of h.Repo onto h over rsync, using shell as the
-// transport rsync hands to its -e flag.
-func copyTo(h *config.Host, shell string, downRepos map[string]string) error {
+// rsyncTo pushes the local clone of h.Repo onto the machine known as alias in
+// this deploy's ssh config, using shell as the transport rsync hands to its -e
+// flag.
+func rsyncTo(h *config.Host, alias, shell string, downRepos map[string]string) error {
 	src, ok := downRepos[h.Repo]
 	if !ok {
 		return fmt.Errorf("no local clone for repo %s (host %s)", h.Repo, h.Name)
@@ -64,7 +59,10 @@ func copyTo(h *config.Host, shell string, downRepos map[string]string) error {
 		Verbose:     true,
 		Exclude:     []string{".git"},
 		RemoteShell: shell,
-		RemoteHost:  h.User + "@" + hostFor(h.IP),
+		// The alias carries the address, the user and the way in, so rsync
+		// only has to name it. It also keeps IPv6 literals out of rsync's
+		// "host:path", where their colons would read as the separator.
+		RemoteHost: alias,
 	}
 
 	// The trailing slash makes rsync copy the contents of src rather
@@ -76,11 +74,6 @@ func copyTo(h *config.Host, shell string, downRepos map[string]string) error {
 	return nil
 }
 
-// hostFor renders addr for use in rsync's "host:path" target, bracketing IPv6
-// literals so their colons are not mistaken for the path separator.
-func hostFor(addr netip.Addr) string {
-	if addr.Is6() && !addr.Is4In6() {
-		return "[" + addr.String() + "]"
-	}
-	return addr.String()
+func scpTo(h *config.Host, alias, shell string, downRepos map[string]string) error {
+	return nil
 }
