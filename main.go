@@ -58,6 +58,7 @@ func main() {
 	err = check.Hosts(cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 
 	// downRepos maps each repo URL to the temp dir it was cloned into.

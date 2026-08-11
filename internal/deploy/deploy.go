@@ -10,31 +10,29 @@ import (
 	"github.com/mlafeldt/chef-runner/rsync"
 )
 
-// All deploys every master and, under it, each of its subjects. downRepos maps
+// All deploys the master and, under it, each of its subjects. downRepos maps
 // a repo URL to the local directory it was cloned into, as returned by
 // fetch.Repo.
 func All(cfg *config.Config, downRepos map[string]string) error {
-	for i := range cfg.Masters {
-		master := &cfg.Masters[i]
-		shell := remoteShell(master)
+	master := &cfg.Master
+	shell := remoteShell(master)
 
-		// An ignored master is the way in, not a destination: its subjects are
-		// still reached through it below, but nothing is written to it.
-		if master.Ignore {
-			fmt.Printf("Not deploying to %s, used as a jump host only\n", master.Name)
-		} else if err := copyTo(&master.Host, shell, downRepos); err != nil {
-			return err
+	// An ignored master is the way in, not a destination: its subjects are
+	// still reached through it below, but nothing is written to it.
+	if master.Ignore {
+		fmt.Printf("Not deploying to %s, used as a jump host only\n", master.Name)
+	} else if err := copyTo(&master.Host, shell, downRepos); err != nil {
+		return err
+	}
+
+	for j := range master.Subjects {
+		subject := &master.Subjects[j]
+		if subject.Ignore {
+			fmt.Printf("Not deploying to %s, ignored in the configuration\n", subject.Name)
+			continue
 		}
-
-		for j := range master.Subjects {
-			subject := &master.Subjects[j]
-			if subject.Ignore {
-				fmt.Printf("Not deploying to %s, ignored in the configuration\n", subject.Name)
-				continue
-			}
-			if err := copyTo(&subject.Host, shell, downRepos); err != nil {
-				return err
-			}
+		if err := copyTo(&subject.Host, shell, downRepos); err != nil {
+			return err
 		}
 	}
 	return nil

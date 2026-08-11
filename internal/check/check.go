@@ -30,37 +30,36 @@ const (
 func Repos(cfg *config.Config) (checked map[string]bool, error error) {
 	fmt.Println("Checking if all the repos loaded in the config are reachable...")
 	checked = make(map[string]bool)
-	for _, master := range cfg.Masters {
-		// Only the repos something is actually deployed with are checked. An
-		// ignored master lends its repo to its subjects without receiving it,
-		// so it reaches this list through them or not at all.
-		var urls []string
-		if !master.Ignore {
-			urls = append(urls, master.Repo)
+	master := cfg.Master
+	// Only the repos something is actually deployed with are checked. An
+	// ignored master lends its repo to its subjects without receiving it,
+	// so it reaches this list through them or not at all.
+	var urls []string
+	if !master.Ignore {
+		urls = append(urls, master.Repo)
+	}
+	for _, subject := range master.Subjects {
+		if subject.Ignore {
+			continue
 		}
-		for _, subject := range master.Subjects {
-			if subject.Ignore {
-				continue
-			}
-			urls = append(urls, subject.Repo)
-		}
+		urls = append(urls, subject.Repo)
+	}
 
-		for _, url := range urls {
-			if checked[url] {
-				continue
-			}
-			checked[url] = true
-
-			rem := git.NewRemote(memory.NewStorage(), &gconfig.RemoteConfig{
-				URLs: []string{url},
-			})
-			ref, err := rem.List(&git.ListOptions{})
-			if err != nil {
-				return checked, fmt.Errorf("checking repo %s: %w", url, err)
-			}
-			fmt.Printf("Repo %s exists, proceeding\n", url)
-			fmt.Printf("ref is: %#v\n", ref) // ONLY FOR DEBUGGING
+	for _, url := range urls {
+		if checked[url] {
+			continue
 		}
+		checked[url] = true
+
+		rem := git.NewRemote(memory.NewStorage(), &gconfig.RemoteConfig{
+			URLs: []string{url},
+		})
+		ref, err := rem.List(&git.ListOptions{})
+		if err != nil {
+			return checked, fmt.Errorf("checking repo %s: %w", url, err)
+		}
+		fmt.Printf("Repo %s exists, proceeding\n", url)
+		fmt.Printf("ref is: %#v\n", ref) // ONLY FOR DEBUGGING
 	}
 	fmt.Println("All repos in the loaded configuration are reachable")
 	return checked, nil
@@ -68,12 +67,14 @@ func Repos(cfg *config.Config) (checked map[string]bool, error error) {
 
 func Hosts(cfg *config.Config) error {
 	fmt.Println("\nChecking all the hosts in the loaded configuration...")
-	for i, master := range cfg.Masters {
-		fmt.Printf("Master %d of %d\n\n", i+1, len(cfg.Masters))
-
-		if err := dial(master.IP, master.Name); err != nil {
-			return err
-		}
+	// Only the first hop can be dialed from here: every other machine in the
+	// config, the master included, lives behind the one before it.
+	if len(cfg.Jumps) > 0 {
+		first := cfg.Jumps[0]
+		return dial(first.IP, first.Name)
+	}
+	if err := dial(cfg.Master.IP, cfg.Master.Name); err != nil {
+		return err
 	}
 	fmt.Println("All hosts in the loaded configuration are reachable")
 	return nil

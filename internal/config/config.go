@@ -7,14 +7,39 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 )
 
-// Config type has 2 fields: the Mode to run in and a list of 1 or more Masters, each one owning its own Subjects
+// defaultPort is what a jump or a master is reached on when the config names
+// no port. It is the ssh port, as ssh is the only supported protocol.
+const defaultPort = 22
+
+var (
+	supportedProtocols = []string{"ssh"}
+	supportedMethods   = []string{"deploy"}
+)
+
+// Config type holds the Mode to run in, the Master owning the Subjects, the
+// Jumps the master is reached through and the values the rest of the file
+// falls back to.
 type Config struct {
-	Mode    string   `yaml:"mode"` // MUST be: report | sync | deploy
-	Masters []Master `yaml:"master"`
+	Mode string `yaml:"mode"` // MUST be: report | sync | deploy
+
+	// Protocol, User, Repo and Dir are the defaults for the file as a whole:
+	// a jump, the master or a subject that leaves one of them out gets the
+	// value from here, and one that sets it overrides it. They are what keeps
+	// a deploy of the same repo, into the same dir, as the same user, over the
+	// same protocol from repeating itself on every host.
+	Protocol string `yaml:"protocol,omitempty"` // MUST be: ssh (for now)
+	User     string `yaml:"user,omitempty"`
+	Repo     string `yaml:"repo,omitempty"`
+	Dir      string `yaml:"dir,omitempty"`
+	Method   string `yaml:"metho,omitempty"`
+
+	Jumps  []Jump `yaml:"jumps,omitempty"`
+	Master Master `yaml:"master"`
 }
 
 // Host holds the fields a master and a subject have in common: where to reach
@@ -27,23 +52,86 @@ type Host struct {
 	// topology. On a master it means "jump host only": its subjects are still
 	// reached through it, but nothing is written to it. On a subject it simply
 	// skips that machine.
-	Ignore bool   `yaml:"ignore"`
-	Repo   string `yaml:"repo"`
-	Dir    string `yaml:"dir"`
-	Method string `yaml:"method"` // MUST be: rsync | scp
-	User   string `yaml:"user"`
+	Ignore bool   `yaml:"ignore,omitempty"`
+	Repo   string `yaml:"repo,omitempty"`
+	Dir    string `yaml:"dir,omitempty"`
+	Method string `yaml:"method,omitempty"` // MUST be: rsync | scp
+	User   string `yaml:"user,omitempty"`
 }
 
 type Master struct {
 	Host     `yaml:",inline"`
 	Subjects []Subject `yaml:"subjects"`
-	Pathway  string    `yaml:"pathway"` // MUST be: ssh (for now)
-	Port     int       `yaml:"port"`
+	Protocol string    `yaml:"protocol,omitempty"` // MUST be: ssh (for now)
+	Port     int       `yaml:"port,omitempty"`
 	Creds    string    `yaml:"creds"` // while only ssh is supported, this must be a path to a key
 }
 
 type Subject struct {
 	Host `yaml:",inline"`
+}
+
+// Jump is one hop on the way to the master, for when it cannot be reached
+// straight from the machine running goship. Jumps are chained in the order
+// they are listed: the first is dialed directly, each of the rest through the
+// one before it, and the master through the last one.
+//
+// A jump is only ever connected through, never deployed to, so it carries what
+// it takes to open the connection and nothing about what to leave behind. That
+// is also why it does not embed Host: repo, dir, method and ignore mean
+// nothing on a machine that is just the way in.
+type Jump struct {
+	IP       netip.Addr `yaml:"ip"`
+	Name     string     `yaml:"name"`
+	Protocol string     `yaml:"protocol,omitempty"` // MUST be: ssh (for now)
+	Port     int        `yaml:"port,omitempty"`
+	User     string     `yaml:"user,omitempty"`
+	Creds    string     `yaml:"creds"` // while only ssh is supported, this must be a path to a key
+}
+
+// applyDefaults walks the config filling in what was left unsaid: the
+// file-wide defaults reach the jumps and the master, and the master's own
+// values reach its subjects, so each level only has to state what differs from
+// the one above it.
+func (c *Config) applyDefaults() {
+	for i := range c.Jumps {
+		jump := &c.Jumps[i]
+		if len(jump.Protocol) == 0 {
+			jump.Protocol = c.Protocol
+		}
+		if len(jump.User) == 0 {
+			jump.User = c.User
+		}
+		if jump.Port == 0 {
+			jump.Port = defaultPort
+		}
+	}
+
+	master := &c.Master
+	if len(master.Protocol) == 0 {
+		master.Protocol = c.Protocol
+	}
+	if len(master.User) == 0 {
+		master.User = c.User
+	}
+	if len(master.Repo) == 0 {
+		master.Repo = c.Repo
+	}
+	if len(master.Dir) == 0 {
+		master.Dir = c.Dir
+	}
+	if len(master.Method) == 0 {
+		master.Method = c.Method
+	}
+	if master.Port == 0 {
+		master.Port = defaultPort
+	}
+
+	// Done after the master has taken its own defaults, so a value stated only
+	// at the top of the file still travels all the way down to the subjects.
+	for i := range master.Subjects {
+		master.Subjects[i].inheritFrom(&master.Host)
+	}
 }
 
 // inheritFrom fills the fields left empty on s with the values of the master
@@ -80,63 +168,75 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
-	if cfg.Mode != "report" && cfg.Mode != "sync" && cfg.Mode != "deploy" {
-		return nil, fmt.Errorf("review your config, task is %s and should be either report, sync or deploy", cfg.Mode)
+	if !slices.Contains(supportedMethods, cfg.Mode) {
+		return nil, fmt.Errorf("review your config, task mode is %s and should be one of these: %v", cfg.Mode, supportedMethods)
 	}
 
-	for i := range cfg.Masters {
-		master := &cfg.Masters[i]
-		if master.Pathway != "ssh" {
-			return nil, fmt.Errorf("only ssh is supported right now")
-		}
-		if len(master.Subjects) == 0 {
-			return nil, fmt.Errorf("you need at least 1 subject for each master to run goship")
-		}
-		if master.Port == 0 {
-			master.Port = 22
-		}
-		// Required either way: a master is connected to whether it is a deploy
-		// target or only the jump host its subjects are reached through.
-		if len(master.User) == 0 {
-			return nil, fmt.Errorf("master %s: no user to connect as", master.Name)
-		}
-		// An ignored master receives nothing, so its repo, dir and method are
-		// only defaults for its subjects and may be left out entirely.
-		if !master.Ignore {
-			if err := validMethod(master.Method); err != nil {
-				return nil, fmt.Errorf("master %s: %w", master.Name, err)
-			}
-			if len(master.Repo) == 0 {
-				return nil, fmt.Errorf("master %s: no repo to deploy, set one or mark the master as ignored", master.Name)
-			}
-			if len(master.Dir) == 0 {
-				return nil, fmt.Errorf("master %s: no dir to deploy into, set one or mark the master as ignored", master.Name)
-			}
-		}
-		for j := range master.Subjects {
-			subject := &master.Subjects[j]
-			subject.inheritFrom(&master.Host)
+	// Everything below is checked after the defaults are in place, so a value
+	// taken from the top of the file is validated exactly like a stated one.
+	cfg.applyDefaults()
 
-			// Nothing is deployed to an ignored subject, so what it would have
-			// been deployed with does not have to add up.
-			if subject.Ignore {
-				continue
-			}
+	for i := range cfg.Jumps {
+		jump := &cfg.Jumps[i]
+		if !slices.Contains(supportedProtocols, jump.Protocol) {
+			return nil, fmt.Errorf("jump %s: method %s is not valid, valid options are: %v", jump.Name, jump.Protocol, supportedProtocols)
+		}
+		if !jump.IP.IsValid() {
+			return nil, fmt.Errorf("jump %s: no ip to reach it at", jump.Name)
+		}
+		if len(jump.User) == 0 {
+			return nil, fmt.Errorf("jump %s: no user to connect as, set one on the jump or as a default", jump.Name)
+		}
+		if len(jump.Creds) == 0 {
+			return nil, fmt.Errorf("jump %s: no creds to connect with", jump.Name)
+		}
+	}
 
-			// Checked after inheritance so subjects falling back to the
-			// master's values are validated too.
-			if err := validMethod(subject.Method); err != nil {
-				return nil, fmt.Errorf("subject %s: %w", subject.Name, err)
-			}
-			if len(subject.User) == 0 {
-				return nil, fmt.Errorf("subject %s: no user to connect as, set it on the subject or its master", subject.Name)
-			}
-			if len(subject.Repo) == 0 {
-				return nil, fmt.Errorf("subject %s: no repo to deploy, set it on the subject or its master", subject.Name)
-			}
-			if len(subject.Dir) == 0 {
-				return nil, fmt.Errorf("subject %s: no dir to deploy into, set it on the subject or its master", subject.Name)
-			}
+	master := &cfg.Master
+	if !slices.Contains(supportedProtocols, master.Protocol) {
+		return nil, fmt.Errorf("method %s is not supported, current options are: %v", master.Protocol, supportedProtocols)
+	}
+	if len(master.Subjects) == 0 {
+		return nil, fmt.Errorf("you need at least 1 subject to run goship")
+	}
+	// Required either way: a master is connected to whether it is a deploy
+	// target or only the jump host its subjects are reached through.
+	if len(master.User) == 0 {
+		return nil, fmt.Errorf("master %s: no user to connect as, set one on the master or as a default", master.Name)
+	}
+	// An ignored master receives nothing, so its repo, dir and method are
+	// only defaults for its subjects and may be left out entirely.
+	if !master.Ignore {
+		if err := validMethod(master.Method); err != nil {
+			return nil, fmt.Errorf("master %s: %w", master.Name, err)
+		}
+		if len(master.Repo) == 0 {
+			return nil, fmt.Errorf("master %s: no repo to deploy, set one, set a default or mark the master as ignored", master.Name)
+		}
+		if len(master.Dir) == 0 {
+			return nil, fmt.Errorf("master %s: no dir to deploy into, set one, set a default or mark the master as ignored", master.Name)
+		}
+	}
+	for j := range master.Subjects {
+		subject := &master.Subjects[j]
+
+		// Nothing is deployed to an ignored subject, so what it would have
+		// been deployed with does not have to add up.
+		if subject.Ignore {
+			continue
+		}
+
+		if err := validMethod(subject.Method); err != nil {
+			return nil, fmt.Errorf("subject %s: %w", subject.Name, err)
+		}
+		if len(subject.User) == 0 {
+			return nil, fmt.Errorf("subject %s: no user to connect as, set it on the subject, on its master or as a default", subject.Name)
+		}
+		if len(subject.Repo) == 0 {
+			return nil, fmt.Errorf("subject %s: no repo to deploy, set it on the subject, on its master or as a default", subject.Name)
+		}
+		if len(subject.Dir) == 0 {
+			return nil, fmt.Errorf("subject %s: no dir to deploy into, set it on the subject, on its master or as a default", subject.Name)
 		}
 	}
 
@@ -155,26 +255,38 @@ func validMethod(m string) error {
 func Print(cfg *Config) {
 	fmt.Println("\nCurrent configuration:")
 	fmt.Printf("Mode: %s\n", cfg.Mode)
-	for _, master := range cfg.Masters {
-		fmt.Printf("\tMaster: %s\n", master.Name)
-		fmt.Printf("\t\tIP: %s\n", master.IP)
-		fmt.Printf("\t\tIgnore: %t\n", master.Ignore)
-		fmt.Printf("\t\tPathway: %s\n", master.Pathway)
-		fmt.Printf("\t\tPort: %d\n", master.Port)
-		fmt.Printf("\t\tCreds: %s\n", master.Creds)
-		fmt.Printf("\t\tRepo: %s\n", master.Repo)
-		fmt.Printf("\t\tDir: %s\n", master.Dir)
-		fmt.Printf("\t\tMethod: %s\n", master.Method)
-		fmt.Printf("\t\tUser: %s\n", master.User)
-		for _, subject := range master.Subjects {
-			fmt.Printf("\t\tSubject: %s\n", subject.Name)
-			fmt.Printf("\t\t\tIP: %s\n", subject.IP)
-			fmt.Printf("\t\t\tIgnore: %t\n", subject.Ignore)
-			fmt.Printf("\t\t\tRepo: %s\n", subject.Repo)
-			fmt.Printf("\t\t\tDir: %s\n", subject.Dir)
-			fmt.Printf("\t\t\tMethod: %s\n", subject.Method)
-			fmt.Printf("\t\t\tUser: %s\n", subject.User)
-		}
+	fmt.Println("\tDefaults:")
+	fmt.Printf("\t\tProtocol: %s\n", cfg.Protocol)
+	fmt.Printf("\t\tUser: %s\n", cfg.User)
+	fmt.Printf("\t\tRepo: %s\n", cfg.Repo)
+	fmt.Printf("\t\tDir: %s\n", cfg.Dir)
+	for i, jump := range cfg.Jumps {
+		fmt.Printf("\tJump %d of %d: %s\n", i+1, len(cfg.Jumps), jump.Name)
+		fmt.Printf("\t\tIP: %s\n", jump.IP)
+		fmt.Printf("\t\tProtocol: %s\n", jump.Protocol)
+		fmt.Printf("\t\tPort: %d\n", jump.Port)
+		fmt.Printf("\t\tUser: %s\n", jump.User)
+		fmt.Printf("\t\tCreds: %s\n", jump.Creds)
+	}
+	master := &cfg.Master
+	fmt.Printf("\tMaster: %s\n", master.Name)
+	fmt.Printf("\t\tIP: %s\n", master.IP)
+	fmt.Printf("\t\tIgnore: %t\n", master.Ignore)
+	fmt.Printf("\t\tProtocol: %s\n", master.Protocol)
+	fmt.Printf("\t\tPort: %d\n", master.Port)
+	fmt.Printf("\t\tCreds: %s\n", master.Creds)
+	fmt.Printf("\t\tRepo: %s\n", master.Repo)
+	fmt.Printf("\t\tDir: %s\n", master.Dir)
+	fmt.Printf("\t\tMethod: %s\n", master.Method)
+	fmt.Printf("\t\tUser: %s\n", master.User)
+	for _, subject := range master.Subjects {
+		fmt.Printf("\t\tSubject: %s\n", subject.Name)
+		fmt.Printf("\t\t\tIP: %s\n", subject.IP)
+		fmt.Printf("\t\t\tIgnore: %t\n", subject.Ignore)
+		fmt.Printf("\t\t\tRepo: %s\n", subject.Repo)
+		fmt.Printf("\t\t\tDir: %s\n", subject.Dir)
+		fmt.Printf("\t\t\tMethod: %s\n", subject.Method)
+		fmt.Printf("\t\t\tUser: %s\n", subject.User)
 	}
 }
 
