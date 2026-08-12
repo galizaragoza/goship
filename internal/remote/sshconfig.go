@@ -1,4 +1,4 @@
-package ship
+package remote
 
 import (
 	"fmt"
@@ -11,10 +11,10 @@ import (
 // Machines are addressed by alias rather than by IP: ssh applies -l, -p and -i
 // to the final destination only, so a per-machine Host block is the one place
 // each one's user, port and key can be stated.
-const masterAlias = "goship-master"
+const MasterAlias = "goship-master"
 
 func jumpAlias(i int) string    { return fmt.Sprintf("goship-jump-%d", i+1) }
-func subjectAlias(i int) string { return fmt.Sprintf("goship-subject-%d", i+1) }
+func SubjectAlias(i int) string { return fmt.Sprintf("goship-subject-%d", i+1) }
 
 // hop is what one Host block is built from: where the machine is, how to log
 // into it, and which other block it is reached through. An empty via means it
@@ -33,7 +33,7 @@ type hop struct {
 // One file covers the whole chain: ssh hands its own -F down to each ProxyJump
 // command it spawns, so a machine three hops deep is still resolved against
 // these same blocks.
-func hopFile(cfg *config.Config) (string, error) {
+func HopFile(cfg *config.Config) (string, error) {
 	file, err := os.CreateTemp("", "goship-ssh-config-*")
 	if err != nil {
 		return "", fmt.Errorf("creating the ssh config for this deploy: %w", err)
@@ -74,7 +74,7 @@ func hopConfig(cfg *config.Config) string {
 	}
 
 	master := &cfg.Master
-	writeHost(&b, masterAlias, hop{
+	writeHost(&b, MasterAlias, hop{
 		addr:  master.IP.String(),
 		user:  master.User,
 		port:  master.Port,
@@ -87,11 +87,11 @@ func hopConfig(cfg *config.Config) string {
 	// wherever the master itself is dialed from, which is the end of the chain.
 	via := last
 	if master.Ignore {
-		via = masterAlias
+		via = MasterAlias
 	}
 	for i := range master.Subjects {
 		subject := &master.Subjects[i]
-		writeHost(&b, subjectAlias(i), hop{
+		writeHost(&b, SubjectAlias(i), hop{
 			addr: subject.IP.String(),
 			user: subject.User,
 			// Subjects carry no key of their own, so they are opened with the

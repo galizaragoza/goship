@@ -87,7 +87,6 @@ func main() {
 
 	switch cfg.Mode {
 	case "report":
-
 	case "sync":
 
 	case "ship":

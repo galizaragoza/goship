@@ -76,9 +76,9 @@ type Host struct {
 type Master struct {
 	Host     `yaml:",inline"`
 	Subjects []Subject `yaml:"subjects"`
-	Protocol string    `yaml:"protocol,omitempty"` // MUST be: ssh (for now)
+	Protocol string    `yaml:"protocol,omitempty"` // MUST be "ssh"
 	Port     int       `yaml:"port,omitempty"`
-	Creds    string    `yaml:"creds"` // while only ssh is supported, this must be a path to a key
+	Creds    string    `yaml:"creds"` // must be a path to a key
 }
 
 type Subject struct {

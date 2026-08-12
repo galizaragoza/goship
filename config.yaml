@@ -1,7 +1,7 @@
 # Scenario: the docker lab under testing/ — one Icinga master container
 # (reachable from the host over the lab_edge network) driving five monitored
 # clients that only live on the lab_internal network.
-mode: ship
+mode: report
 
 protocol: ssh
 user: root

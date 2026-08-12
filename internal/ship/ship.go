@@ -7,6 +7,7 @@ import (
 
 	"goship/internal/config"
 	"goship/internal/out"
+	"goship/internal/remote"
 
 	"github.com/mlafeldt/chef-runner/log"
 	"github.com/mlafeldt/chef-runner/rsync"
@@ -25,7 +26,7 @@ func All(cfg *config.Config, downRepos map[string]string) error {
 
 	out.Section("Shipping")
 
-	path, err := hopFile(cfg)
+	path, err := remote.HopFile(cfg)
 	if err != nil {
 		return err
 	}
@@ -36,21 +37,25 @@ func All(cfg *config.Config, downRepos map[string]string) error {
 	// still reached through it below, but nothing is written to it.
 	if master.Ignore {
 		out.Item("Not deploying to %s, used as a jump host only", master.Name)
-	} else if err := rsyncTo(&master.Host, masterAlias, shell, downRepos); err != nil {
+	} else if err := rsyncTo(&master.Host, remote.MasterAlias, shell, downRepos); err != nil {
 		return err
 	}
+	out.Item("Master already deployed")
 
 	g := new(errgroup.Group)
 
 	for j := range master.Subjects {
+
 		subject := &master.Subjects[j]
 		if subject.Ignore {
 			out.Item("Not deploying to %s, ignored in the configuration", subject.Name)
 			continue
 		}
 		g.Go(func() error {
-			if err := rsyncTo(&subject.Host, subjectAlias(j), shell, downRepos); err != nil {
+			if err := rsyncTo(&subject.Host, remote.SubjectAlias(j), shell, downRepos); err != nil {
 				return err
+			} else {
+				out.Item("Host %d out of %d", j+1, len(master.Subjects))
 			}
 			return err
 		})
@@ -75,7 +80,6 @@ func rsyncTo(h *config.Host, alias, shell string, downRepos map[string]string) e
 		Archive:  true,
 		Compress: true,
 		// Verbose:     true,
-		Exclude:     []string{".git"},
 		RemoteShell: shell,
 		// The alias carries the address, the user and the way in, so rsync
 		// only has to name it. It also keeps IPv6 literals out of rsync's
