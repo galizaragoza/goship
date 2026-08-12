@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"strconv"
 	"time"
 
 	"goship/internal/config"
@@ -78,7 +77,7 @@ func Hosts(cfg *config.Config) error {
 }
 
 func dial(ip netip.Addr, name string) error {
-	addr := net.JoinHostPort(ip.String(), strconv.Itoa(config.DefaultPort))
+	addr := net.JoinHostPort(ip.String(), config.DefaultPort)
 	conn, err := net.DialTimeout("tcp", addr, dialTimeout)
 	if err != nil {
 		return fmt.Errorf("host %s (%s) not responding: %w", ip, name, err)

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"goship/internal/check"
 	"goship/internal/config"
 	"goship/internal/fetch"
 	"goship/internal/out"
+	"goship/internal/remote"
 	"goship/internal/ship"
 )
 
@@ -87,6 +89,9 @@ func main() {
 
 	switch cfg.Mode {
 	case "report":
+		out := remote.All(cfg, "whoami")
+		fmt.Println(out)
+
 	case "sync":
 
 	case "ship":

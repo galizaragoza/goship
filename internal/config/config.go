@@ -17,7 +17,7 @@ import (
 
 // DefaultPort is what a jump or a master is reached on when the config names
 // no port. It is the ssh port, as ssh is the only supported protocol.
-const DefaultPort = 22
+const DefaultPort string = "22"
 
 var (
 	supportedProtocols = []string{"ssh"}
@@ -62,6 +62,7 @@ func (d Defaults) asHost() Host {
 type Host struct {
 	IP   netip.Addr `yaml:"ip"`
 	Name string     `yaml:"name"`
+	Port string     `yaml:"port"`
 	// Ignore takes the host out of the deploy without taking it out of the
 	// topology. On a master it means "jump host only": its subjects are still
 	// reached through it, but nothing is written to it. On a subject it simply
@@ -77,8 +78,7 @@ type Master struct {
 	Host     `yaml:",inline"`
 	Subjects []Subject `yaml:"subjects"`
 	Protocol string    `yaml:"protocol,omitempty"` // MUST be "ssh"
-	Port     int       `yaml:"port,omitempty"`
-	Creds    string    `yaml:"creds"` // must be a path to a key
+	Creds    string    `yaml:"creds"`              // must be a path to a key
 }
 
 type Subject struct {
@@ -96,7 +96,7 @@ type Jump struct {
 	IP       netip.Addr `yaml:"ip"`
 	Name     string     `yaml:"name"`
 	Protocol string     `yaml:"protocol,omitempty"` // MUST be: ssh (for now)
-	Port     int        `yaml:"port,omitempty"`
+	Port     string     `yaml:"port,omitempty"`
 	User     string     `yaml:"user,omitempty"`
 	Creds    string     `yaml:"creds"` // while only ssh is supported, this must be a path to a key
 }
@@ -137,8 +137,8 @@ func (c *Config) applyDefaults() {
 	base := c.Defaults.asHost()
 	master := &c.Master
 	master.inheritFrom(&base)
-	// Protocol and Port sit on Master rather than on Host, so they fall back
-	// separately from the fields inheritFrom covers.
+	// Protocol sits on Master, and Port is not one of the fields inheritFrom
+	// covers, so both fall back on their own.
 	orElse(&master.Protocol, c.Protocol)
 	orElse(&master.Port, DefaultPort)
 
@@ -282,7 +282,7 @@ func Print(cfg *Config) {
 		section(1, fmt.Sprintf("Jump %d of %d: %s", i+1, len(cfg.Jumps), jump.Name),
 			"IP", jump.IP.String(),
 			"Protocol", jump.Protocol,
-			"Port", strconv.Itoa(jump.Port),
+			"Port", jump.Port,
 			"User", jump.User,
 			"Creds", jump.Creds)
 	}
@@ -292,7 +292,7 @@ func Print(cfg *Config) {
 		"IP", master.IP.String(),
 		"Ignore", strconv.FormatBool(master.Ignore),
 		"Protocol", master.Protocol,
-		"Port", strconv.Itoa(master.Port),
+		"Port", master.Port,
 		"Creds", master.Creds,
 		"Repo", master.Repo,
 		"Dir", master.Dir,

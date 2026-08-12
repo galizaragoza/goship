@@ -22,7 +22,7 @@ func SubjectAlias(i int) string { return fmt.Sprintf("goship-subject-%d", i+1) }
 type hop struct {
 	addr  string
 	user  string
-	port  int
+	port  string
 	creds string
 	via   string
 }
@@ -111,8 +111,8 @@ func writeHost(b *strings.Builder, alias string, h hop) {
 	if len(h.user) > 0 {
 		fmt.Fprintf(b, "  User %s\n", h.user)
 	}
-	if h.port > 0 {
-		fmt.Fprintf(b, "  Port %d\n", h.port)
+	if len(h.port) > 0 {
+		fmt.Fprintf(b, "  Port %s\n", h.port)
 	}
 	if len(h.creds) > 0 {
 		// Quoted so a path with spaces in it survives, and IdentitiesOnly so
